@@ -1,22 +1,31 @@
 <script setup>
 import { ref, watch, computed } from 'vue';
-import { fetchDecks, fetchDeckDetails } from '@/services/api'; // NEW: Added fetchDeckDetails
+import { fetchDecks, fetchDeckDetails } from '@/services/api';
+import AutocompleteInput from './AutocompleteInput.vue';
+import {
+    ARCHETYPES,
+    CARD_NAMES,
+    TOURNAMENT_NAMES // NEW IMPORT
+} from '@/data/autocomplete';
 
 // --- State Variables (Main Search) ---
 const searchResults = ref([]);
 const totalCount = ref(0);
 const currentPage = ref(1);
-const limit = ref(25);
 const isLoading = ref(false);
 const error = ref(null);
 
-// Form Inputs (using ref for reactivity - what the user is typing)
-const currentQuery = ref('');
+// Entries per page
+const selectedLimit = ref(25);
+const limitOptions = [10, 25, 50, 100];
+
+// Form Inputs (what the user is typing)
+const currentTournamentName = ref('');
 const currentArchetype = ref('');
 const currentCard = ref('');
 
 // Trigger Variables (The values used for the actual API call)
-const searchTriggerQuery = ref('');
+const searchTriggerTournamentName = ref('');
 const searchTriggerArchetype = ref('');
 const searchTriggerCard = ref('');
 
@@ -25,24 +34,15 @@ const selectedDeckId = ref(null);
 const deckDetails = ref(null);
 const isDetailLoading = ref(false);
 
-function calculateTotalCopies(cardList) {
-    if (!cardList || cardList.length === 0) {
-        return 0;
-    }
-    // Use the reduce method to sum the 'copies' property of each object in the array
-    return cardList.reduce((sum, card) => sum + card.copies, 0);
-}
-
-
 // --- Computed Properties for UI ---
 const totalPages = computed(() => {
-    return Math.ceil(totalCount.value / limit.value);
+    return Math.ceil(totalCount.value / selectedLimit.value);
 });
 
 // --- Search Handler: Updates the trigger variables and resets page to 1 ---
 function handleSearch() {
     // 1. Commit the values from the input fields to the trigger fields
-    searchTriggerQuery.value = currentQuery.value;
+    searchTriggerTournamentName.value = currentTournamentName.value;
     searchTriggerArchetype.value = currentArchetype.value;
     searchTriggerCard.value = currentCard.value;
 
@@ -55,15 +55,15 @@ function handleSearch() {
 async function performSearch() {
     isLoading.value = true;
     error.value = null;
-    closeDetails(); // Close any open detail view when a new search runs
+    closeDetails();
 
     const filters = {
-        // Use the "Trigger" variables for the actual API call
-        q: searchTriggerQuery.value,
+        // q field is now bound to the Tournament Name input
+        q: searchTriggerTournamentName.value,
         archetype: searchTriggerArchetype.value,
         card: searchTriggerCard.value,
         page: currentPage.value,
-        limit: limit.value,
+        limit: selectedLimit.value,
     };
 
     try {
@@ -99,13 +99,10 @@ async function viewDetails(recordId) {
     selectedDeckId.value = recordId;
     isDetailLoading.value = true;
     deckDetails.value = null;
-
-    // Scroll to the top of the modal/page on open
     window.scrollTo(0, 0);
 
     try {
         const details = await fetchDeckDetails(recordId);
-        // The backend returns keys in lowercase: maindeck, extradeck, sidedeck
         deckDetails.value = details;
     } catch (e) {
         console.error("Failed to load deck details", e);
@@ -119,7 +116,36 @@ function closeDetails() {
     deckDetails.value = null;
 }
 
-// Initial load (Trigger the search immediately when component mounts)
+// --- Total Copies Calculation ---
+function calculateTotalCopies(cardList) {
+    if (!cardList || cardList.length === 0) { return 0; }
+    // Ensure card.copies is treated as a number
+    return cardList.reduce((sum, card) => sum + Number(card.copies), 0);
+}
+
+// --- Click Handler for Middle-Click / Left-Click ---
+function handleDeckClick(event, recordId) {
+    event.preventDefault();
+
+    // NOTE: You must replace the placeholder with the actual base URL of your API Gateway
+    const BASE_API_URL = 'https://[YOUR_API_ID].execute-api.[YOUR_REGION].amazonaws.com/prod';
+
+    if (event.button === 0) {
+        viewDetails(recordId);
+    } else if (event.button === 1) {
+        // Construct the direct URL to the API endpoint for the new tab
+        const apiUrl = `${BASE_API_URL}/decks/${recordId}`;
+        window.open(apiUrl, '_blank');
+    }
+}
+
+// Watch for limit changes to trigger new search
+watch(selectedLimit, () => {
+    currentPage.value = 1; // Always reset to page 1
+    performSearch();
+});
+
+// Initial load
 handleSearch();
 </script>
 
@@ -127,7 +153,7 @@ handleSearch();
     <div class="deck-search-container">
         <h1>YGO Deck Search Engine</h1>
 
-        <!-- Detail Modal/Drawer (Shows up when a deck is clicked) -->
+        <!-- Detail Modal/Drawer (Remains the same) -->
         <div v-if="selectedDeckId" class="deck-detail-overlay">
             <div class="modal-content">
                 <button @click="closeDetails" class="close-button">X</button>
@@ -138,7 +164,6 @@ handleSearch();
 
                     <div class="deck-sections">
                         <section>
-                            <!-- FIX APPLIED HERE -->
                             <h3>Main Deck ({{ calculateTotalCopies(deckDetails.maindeck) }})</h3>
                             <ul>
                                 <li v-for="card in deckDetails.maindeck" :key="card.name">{{ card.copies }}x {{ card.name }}</li>
@@ -146,7 +171,6 @@ handleSearch();
                         </section>
 
                         <section>
-                            <!-- FIX APPLIED HERE -->
                             <h3>Extra Deck ({{ calculateTotalCopies(deckDetails.extradeck) }})</h3>
                             <ul>
                                 <li v-for="card in deckDetails.extradeck" :key="card.name">{{ card.copies }}x {{ card.name }}</li>
@@ -154,7 +178,6 @@ handleSearch();
                         </section>
 
                         <section>
-                            <!-- FIX APPLIED HERE -->
                             <h3>Side Deck ({{ calculateTotalCopies(deckDetails.sidedeck) }})</h3>
                             <ul>
                                 <li v-for="card in deckDetails.sidedeck" :key="card.name">{{ card.copies }}x {{ card.name }}</li>
@@ -167,14 +190,45 @@ handleSearch();
             </div>
         </div>
 
-        <!-- Search & Filter Controls: Bind to 'current' variables -->
+        <!-- Search & Filter Controls: USE AUTOCOMPLETE INPUTS -->
         <div class="filters">
-            <input v-model="currentQuery" placeholder="Tournament, Deck Name, or Duelist" @keyup.enter="handleSearch" :disabled="isLoading" />
-            <input v-model="currentArchetype" placeholder="Filter by Archetype" @keyup.enter="handleSearch" :disabled="isLoading" />
-            <input v-model="currentCard" placeholder="Card Name present in deck" @keyup.enter="handleSearch" :disabled="isLoading" />
+            <!-- Autocomplete for Tournament Name -->
+            <AutocompleteInput
+                v-model="currentTournamentName"
+                :suggestions="TOURNAMENT_NAMES"
+                placeholder="Tournament Name, Deck Name, or Duelist"
+                @keyup.enter="handleSearch"
+                :disabled="isLoading"
+                class="filter-input"
+            />
+
+            <!-- AutocompleteInput for Archetype -->
+            <AutocompleteInput
+                v-model="currentArchetype"
+                :suggestions="ARCHETYPES"
+                placeholder="Filter by Archetype"
+                @keyup.enter="handleSearch"
+                :disabled="isLoading"
+                class="filter-input"
+            />
+
+            <!-- AutocompleteInput for Card Name -->
+            <AutocompleteInput
+                v-model="currentCard"
+                :suggestions="CARD_NAMES"
+                placeholder="Card Name present in deck"
+                @keyup.enter="handleSearch"
+                :disabled="isLoading"
+                class="filter-input"
+            />
 
             <!-- Search Button -->
             <button @click="handleSearch" :disabled="isLoading">Search</button>
+
+            <!-- Entries per page Dropdown -->
+            <select v-model="selectedLimit" :disabled="isLoading" class="limit-selector">
+                <option v-for="opt in limitOptions" :key="opt" :value="opt">Show {{ opt }} Entries</option>
+            </select>
         </div>
 
         <!-- Loading / Error Feedback -->
@@ -183,7 +237,6 @@ handleSearch();
 
         <!-- Search Results Area -->
         <div v-else-if="searchResults.length">
-            <!-- FIX 3: Display total count/pages -->
             <p>Found {{ totalCount }} decks in total. Showing page {{ currentPage }} of {{ totalPages }}.</p>
 
             <!-- Clickable Deck List -->
@@ -192,7 +245,7 @@ handleSearch();
                     v-for="deck in searchResults"
                     :key="deck.record_id"
                     class="deck-item clickable"
-                    @click="viewDetails(deck.record_id)"
+                    @mousedown="handleDeckClick($event, deck.record_id)"
                 >
                     <strong>{{ deck.tournament }}</strong> ({{ deck.archetype }}) - Duelist: {{ deck.duelist }}
                 </div>
@@ -212,6 +265,7 @@ handleSearch();
         </div>
     </div>
 </template>
+
 
 <style>
 /* Basic styling for readability */
