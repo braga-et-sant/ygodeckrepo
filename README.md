@@ -1,6 +1,6 @@
 # ygo-deck-viewer
 
-This template should help get you started developing with Vue 3 in Vite.
+Repackaged the data from ygotopdecks
 
 ## Recommended IDE Setup
 
