@@ -4,6 +4,7 @@
 const API_BASE_URL = 'https://5c0sbmte94.execute-api.eu-north-1.amazonaws.com';
 const STAGE_NAME = 'prod'; // <-- CRUCIAL: Use your actual stage name
 
+
 export async function fetchDecks({ q, archetype, card, page, limit = 25 }) {
     // 1. Build the query string dynamically
     const params = new URLSearchParams();
